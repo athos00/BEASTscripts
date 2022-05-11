@@ -1,0 +1,52 @@
+#!/bin/bash
+
+# Default assumptions
+
+## Path assumptions
+### A1 BEAGLE lives in /usr/local/lib
+### A2 beast.jar lives in current directory
+
+## XML assumptions
+### A3 generator output file is the only file line with ".xml" in it
+### A4 only one sequence alignment in template XML and with specific structure
+### A5 rep0 output filenames will be changed to repi (i in 1:N)
+
+# To edit an assumption, see where it arises in the comments below
+
+read -r -p 'path to sequence generator XML (with .xml suffix): ' generator
+read -r -p 'path to template XML (with .xml suffix): ' template
+read -r -p 'number of replicates: ' N
+
+# input an integer greater than 0
+[ -n "$N" ] && [ "$N" -gt 0 ] 2>/dev/null
+if [ $? -ne 0 ]; then
+   echo $N is not greater than 0, exiting script
+   exit 1
+fi
+
+sequence=$(grep -o '".*.xml"' gen.xml | tr -d '"') #A3
+
+# test sequence file
+java -jar -Djava.library.path=/usr/local/lib beast.jar -overwrite $generator #A1 #A2
+
+if [ ! -f "$sequence" ]; then
+    echo "$sequence sequence output file name is incorrectly formatted, please reformat the output of your generator file to .xml."
+    exit 1
+fi
+
+startReplace=$(grep -n "alignment id=" $template | awk '{print $1}' FS=":") #A4
+endReplace=$(grep -n "/alignment" $template | awk '{print $1}' FS=":") #A4
+
+for ((i = 1; i <= N; i++)); do
+    cp $template "rep$i.xml"; 
+    # remove sequence:
+    sed -i'.tmp' "$startReplace,$endReplace d" rep$i.xml
+    # simulate new sequence:
+    java -jar -Djava.library.path=/usr/local/lib beast.jar -overwrite $generator #A1 #A2
+    # input sequence:
+    sed -i'.tmp' "$startReplace r $sequence" rep$i.xml
+    # update filenames:
+    sed -i'.tmp' "s/rep0/rep$i/g" rep$i.xml #A5
+done
+
+rm *.tmp
