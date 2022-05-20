@@ -1,21 +1,59 @@
 #!/bin/bash
 
+# TODO: move startReplace, endReplace and suffix from being looped over repeatedly
+
 # Default assumptions
 
 ## Path assumptions
-### A1 BEAGLE lives in /usr/local/lib
-### A2 beast.jar lives in current directory
+#### A1 BEAGLE lives in /usr/local/lib
+#### A2 beast.jar lives in specific directory
 
 ## XML assumptions
-### A3 generator output file is the only file line with ".xml" in it
-### A4 only one sequence alignment in template XML and with specific structure
-### A5 rep0 output filenames will be changed to repi (i in 1:N)
+###-- generator xml assumptions --###
+#### A3 generator outputs sequence in a file with extension ".xml", only this line in the generator contains the regex ".xml"
+###-- template xml assumptions --###
+#### A4 only one sequence alignment in template XML and with specific structure
+#### A5 rep0 output filenames will be changed to repi (i in 1:N)
+#### A6 template XML titled rep0_desired_suffix
 
 # To edit an assumption, see where it arises in the comments below
 
-read -r -p 'path to sequence generator XML (with .xml suffix): ' generator
-read -r -p 'path to template XML (with .xml suffix): ' template
-read -r -p 'number of replicates: ' N
+force=2
+
+while getopts g:t:n:f,i flag
+do
+    case "${flag}" in
+        g) generator=$(echo ${OPTARG}) ;; # path to sequence generator XML (with .xml suffix)
+        t) template+=("${OPTARG}") ;; # path to template XML (with .xml suffix)
+        n) N=${OPTARG} ;; # number of replicates (integer)
+        f) force=1 ;; # force continue without checking specifications
+        i) interactive=1 ;; # interactive enter 
+    esac
+done
+
+# interactive option
+if [ $interactive -eq 1 ]; then
+    read -r -p 'path to sequence generator XML (with .xml suffix): ' generator
+    read -r -p 'path to template XML (with .xml suffix): ' template
+    read -r -p 'number of replicates: ' N
+fi
+
+echo "generator: $generator";
+echo "template(s): ${template[@]}";
+echo "number of replicates: $N";
+echo "force: $force";
+
+########
+# exit 2 # debug spot
+########
+
+if [ $force -ne 1 ]; then
+    read -r -p 'Would you like to continue with the above specifications? (y/n):' continue
+    if [ $continue != 'y' ]; then
+    echo "Aborting"
+    exit 1
+    fi
+fi
 
 # input an integer greater than 0
 [ -n "$N" ] && [ "$N" -gt 0 ] 2>/dev/null
@@ -24,29 +62,48 @@ if [ $? -ne 0 ]; then
    exit 1
 fi
 
-sequence=$(grep -o '".*.xml"' gen.xml | tr -d '"') #A3
+sequence=$(grep -o '".*.xml"' $generator | tr -d '"') #A3
 
 # test sequence file
-java -jar -Djava.library.path=/usr/local/lib beast.jar -overwrite $generator #A1 #A2
+java -jar -Djava.library.path=/usr/local/lib /Users/athos/GitFolders/beast-mcmc/build/dist/beast.jar -overwrite $generator #A1 #A2
 
 if [ ! -f "$sequence" ]; then
     echo "$sequence sequence output file name is incorrectly formatted, please reformat the output of your generator file to .xml."
     exit 1
 fi
 
-startReplace=$(grep -n "alignment id=" $template | awk '{print $1}' FS=":") #A4
-endReplace=$(grep -n "/alignment" $template | awk '{print $1}' FS=":") #A4
-
 for ((i = 1; i <= N; i++)); do
-    cp $template "rep$i.xml"; 
-    # remove sequence:
-    sed -i'.tmp' "$startReplace,$endReplace d" rep$i.xml
     # simulate new sequence:
-    java -jar -Djava.library.path=/usr/local/lib beast.jar -overwrite $generator #A1 #A2
+    java -jar -Djava.library.path=/usr/local/lib /Users/athos/GitFolders/beast-mcmc/build/dist/beast.jar -overwrite $generator #A1 #A2
+
+    for templateIndex in ${template[@]}
+    do
+    # get start and end indices of alignment
+    startReplace=$(grep -n "alignment id=" $templateIndex | awk '{print $1}' FS=":") #A4
+    endReplace=$(grep -n "/alignment" $templateIndex | awk '{print $1}' FS=":") #A4
+
+    # get suffix
+    suffix=$(echo $templateIndex | sed -n 's/rep0//p') #A6
+
+    cp $templateIndex "rep$i$suffix"; 
+    # remove sequence:
+    sed -i'.tmp' "$startReplace,$endReplace d" rep$i$suffix
+
     # input sequence:
-    sed -i'.tmp' "$startReplace r $sequence" rep$i.xml
+    sed -i'.tmp' "$startReplace r $sequence" rep$i$suffix
     # update filenames:
-    sed -i'.tmp' "s/rep0/rep$i/g" rep$i.xml #A5
+    sed -i'.tmp' "s/rep0/rep$i/g" rep$i$suffix #A5
+    done
 done
 
 rm *.tmp
+
+# additional working edits
+
+# get suffix
+# suffix=$(echo $template | sed -n 's/rep0//p') #A6
+# # add suffix
+# for file in *.xml; do
+#     mv "$file" "${file%.xml} $suffix"
+# done
+
